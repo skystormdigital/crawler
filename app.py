@@ -160,10 +160,17 @@ def crawl(url, base, depth, rp):
             in_links.setdefault(link, 0); in_links[link] += 1
         for img in soup.find_all("img", src=True):
             img_url = urljoin(url, img["src"])
-            image_rows.append({"Page": url, "Image": img_url,
-                               "Alt": img.get("alt",""),
-                               "Width": img.get("width",""),
-                               "Height": img.get("height","")})
+            ext_ok  = img_url.split("?")[0].lower().endswith((".png", ".jpg", ".jpeg", ".webp"))  # NEW
+            alt_txt = img.get("alt", "")                                                                 # NEW
+            image_rows.append({
+                "Page":   url,
+                "Image":  img_url,
+                "Alt":    alt_txt,
+                "Format": pathlib.Path(img_url).suffix.lower().lstrip("."),
+                "Alt missing": ext_ok and (alt_txt.strip() == ""),                                        # NEW
+                "Width":  img.get("width",""),
+                "Height": img.get("height",""),
+            })
 
         # ── progress update ─────────────────────
         if max_pages:
@@ -274,6 +281,10 @@ if start_btn and start_url and email_valid:
     image_df  = pd.DataFrame(image_rows)
     orphan_df = pd.DataFrame([{"URL": u} for u in df["URL"] if in_links.get(u,0)==0])
 
+    # metric for missing alts  NEW
+    missing_alts = image_df["Alt missing"].sum()
+    st.metric("Images without alt text", int(missing_alts))
+
     # ────────── UI tabs ──────────
     tabs = st.tabs(["All pages","Issues","Broken links","Duplicates","Canonicals",
                     "Internal graph","Images","Orphans"])
@@ -291,7 +302,12 @@ if start_btn and start_url and email_valid:
             for t in list(targets)[:50]:
                 if is_internal(base_url, t): dot.edge(src, t)
         st.graphviz_chart(dot)
-    with tabs[6]: st.dataframe(image_df, use_container_width=True)
+    with tabs[6]:
+        st.dataframe(image_df, use_container_width=True)
+        miss_df = image_df[image_df["Alt missing"]]  # NEW
+        if not miss_df.empty:                          # NEW
+            st.subheader("🖼️ Images missing ALT text")  # NEW
+            st.dataframe(miss_df, use_container_width=True)  # NEW
     with tabs[7]: st.dataframe(orphan_df, use_container_width=True)
 
     # chart
@@ -310,6 +326,7 @@ if start_btn and start_url and email_valid:
         broken_df.to_excel(w,index=False,sheet_name="Broken")
         dup_df.to_excel(w,index=False,sheet_name="Duplicates")
         can_df.to_excel(w,index=False,sheet_name="Canonicals")
+        image_df.to_excel(w,index=False,sheet_name="Images")  # UPDATED contains Alt missing
     st.download_button("Excel", xbuf.getvalue(), "crawl.xlsx",
                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
