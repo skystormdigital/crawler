@@ -50,7 +50,14 @@ max_pages = st.sidebar.number_input("Stop after N pages (0 = unlimited)", 0,
 # ───────────────────────── Main UI ─────────────────────────
 st.title("SEO Crawler & Reporter 📄")
 start_url = st.text_input("Website URL", placeholder="https://example.com")
+# Email input (above website URL and button)
+email = st.text_input("Your Email Address", placeholder="name@example.com")
+email_valid = re.match(r"^[^@]+@[^@]+\.[^@]+$", email or "")
+# Optional: Show a warning if button is pressed without a valid email
+if not email_valid and start_btn:
+    st.warning("Please enter a valid email address to start the crawl.")
 start_btn = st.button("Start crawl")
+
 
 # progress bar placeholders
 progress_bar = st.empty()
@@ -201,7 +208,9 @@ async def audit_links_and_images():
         row["Status"] = img_status.get(row["Image"])
 
 # ───────────────────────── Run crawl ─────────────────────────
-if start_btn and start_url:
+if start_btn and start_url and email_valid:
+    # You may want to store/log emails, or use them later
+    # For example: st.info(f"Crawling as: {email}")
     base_url = start_url.strip().rstrip("/")
     if resume and os.path.exists(STATE_FILE):
         (visited, rows, broken_links, out_links, in_links,
