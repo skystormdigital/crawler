@@ -3,5 +3,5 @@ requests
 beautifulsoup4
 tldextract
 pandas
-python-robotexclusionrulesparser
+robotexclusionrulesparser
 lxml
