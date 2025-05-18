@@ -102,6 +102,24 @@ def load_state():
 # ───────────────────────── Core crawler ─────────────────────────
 def crawl(url, base, depth, rp):
     global pages_crawled
+    # ───── debug lines start ─────
+    st.write("🔍 trying:", url)                         # ①
+    if url in visited:
+        st.write(" ↳ skipped (visited)")               # ②
+        return
+    if depth > max_depth:
+        st.write(" ↳ skipped (depth)")                 # ③
+        return
+    if not rp.is_allowed(HEADERS["User-Agent"], url):
+        st.write(" ↳ blocked by robots.txt")           # ④
+        return
+    if not allowed_path(urlparse(url).path):
+        st.write(" ↳ filtered by regex")               # ⑤
+        return
+    st.write(" ✔ fetching…")                           # ⑥
+    # ───── debug lines end ─────
+
+    visited.add(url)
     if url in visited or depth>max_depth or (max_pages and pages_crawled>=max_pages): return
     if not rp.is_allowed(HEADERS["User-Agent"], url): return
     if not allowed_path(urlparse(url).path): return
