@@ -5,6 +5,7 @@
 import os, re, time, pickle, xml.etree.ElementTree as ET, datetime, pathlib, asyncio
 from io import BytesIO
 from urllib.parse import urljoin, urlparse
+import csv  # <-- Added for email storage
 
 import httpx
 import matplotlib.pyplot as plt
@@ -49,6 +50,8 @@ max_pages = st.sidebar.number_input("Stop after N pages (0 = unlimited)", 0,
 
 # ───────────────────────── Main UI ─────────────────────────
 st.title("SEO Crawler & Reporter 📄")
+
+# Email input (above website URL and button)
 email = st.text_input("Your Email Address", placeholder="name@example.com")
 email_valid = re.match(r"^[^@]+@[^@]+\.[^@]+$", email or "")
 
@@ -208,8 +211,16 @@ async def audit_links_and_images():
 
 # ───────────────────────── Run crawl ─────────────────────────
 if start_btn and start_url and email_valid:
-    # You may want to store/log emails, or use them later
-    # For example: st.info(f"Crawling as: {email}")
+    # Save email, time, and URL to CSV
+    email_csv = "emails.csv"
+    write_header = not os.path.exists(email_csv)
+    with open(email_csv, "a", newline="") as f:
+        writer = csv.writer(f)
+        if write_header:
+            writer.writerow(["timestamp", "email", "website_url"])
+        writer.writerow([datetime.datetime.now().isoformat(), email, start_url])
+    st.success("Email address stored. Starting crawl...")
+
     base_url = start_url.strip().rstrip("/")
     if resume and os.path.exists(STATE_FILE):
         (visited, rows, broken_links, out_links, in_links,
