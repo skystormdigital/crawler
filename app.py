@@ -1,14 +1,6 @@
 # ─────────────────────────────────────────────────────────────
 # SEO Crawler & Reporter – all‑in‑one Streamlit app
-# Features:
-#  • Crawl management (UA, include/exclude, throttle, resume)
-#  • Meta + deeper SEO fields
-#  • Broken‑link audit (internal & external)
-#  • Internal‑link graph + orphan detection
-#  • Duplicate‑content clusters
-#  • Canonical validation + indexability overlay
-#  • Image weight & dimension audit
-#  • Quality scoring, charts, exports (CSV/JSON/Excel), historical diffs
+# (now with crawl‑progress bar)
 # ─────────────────────────────────────────────────────────────
 
 import os, re, time, pickle, xml.etree.ElementTree as ET, datetime, pathlib, asyncio
@@ -54,29 +46,39 @@ exc_re = re.compile(exc_pattern) if exc_pattern else None
 delay_sec = st.sidebar.number_input("Delay between requests (s)", 0.0, 10.0, 0.5, 0.1)
 resume = st.sidebar.checkbox("Resume previous crawl", True)
 max_depth = st.sidebar.slider("Max depth", 0, 6, 2)
+max_pages = st.sidebar.number_input("Stop after N pages (0 = unlimited)", 0, 100000, 0, 100)
 
 # ───────────────────────── Main UI ─────────────────────────
 st.title("SEO Crawler & Reporter 📄")
 start_url = st.text_input("Website URL", placeholder="https://example.com")
 start_btn = st.button("Start crawl")
 
+# progress bar placeholders
+progress_bar = st.empty()
+status_txt   = st.empty()
+
 STATE_FILE = "crawl_state.pkl"
 HISTORY_DIR = pathlib.Path("history"); HISTORY_DIR.mkdir(exist_ok=True)
 
 # ───────────────────────── Helpers ─────────────────────────
-def polite_get(u): time.sleep(delay_sec); return requests.get(u, timeout=10, headers=HEADERS)
+def polite_get(u):
+    time.sleep(delay_sec)
+    return requests.get(u, timeout=10, headers=HEADERS)
 
 def is_internal(base, link):
     b = tldextract.extract(base).registered_domain
     l = tldextract.extract(link).registered_domain
     return (b == l) or (l == "")
 
-def allowed_path(path): return (not inc_re or inc_re.search(path)) and (not exc_re or not exc_re.search(path))
+def allowed_path(path):
+    return (not inc_re or inc_re.search(path)) and (not exc_re or not exc_re.search(path))
 
 def fetch_robots(root):
     rp = RobotExclusionRulesParser()
-    try: rp.parse(polite_get(urljoin(root, "/robots.txt")).text.splitlines())
-    except Exception: pass
+    try:
+        rp.parse(polite_get(urljoin(root, "/robots.txt")).text.splitlines())
+    except Exception:
+        pass
     return rp
 
 def seed_from_sitemap(root):
@@ -84,8 +86,8 @@ def seed_from_sitemap(root):
         xml_data = polite_get(urljoin(root, "/sitemap.xml")).content
         tree = ET.fromstring(xml_data)
         return [loc.text.strip() for loc in tree.iter("{*}loc")]
-    except Exception: return []
-
+    except Exception:
+        return []
 # ───────────────────────── Crawl data containers ─────────────────────────
 visited, pages_crawled, SAVE_EVERY = set(), 0, 50
 rows = []                             # page‑level SEO data
