@@ -138,7 +138,6 @@ st.write(f" ↳ status {r.status_code}, content‑type {r.headers.get('Content
 if r.status_code != 200 or "text/html" not in r.headers.get("Content-Type", ""):
     return
 
-        soup = BeautifulSoup(r.text, "html.parser")
 
         # collect tags
         title = soup.title.string.strip() if soup.title else ""
