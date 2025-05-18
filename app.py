@@ -128,14 +128,10 @@ def crawl(url, base, depth, rp):
     if not allowed_path(urlparse(url).path): return
     visited.add(url)
 
-   r = polite_get(url)
-
-# ─── debug ───
-st.write(f" ↳ status {r.status_code}, content‑type {r.headers.get('Content-Type','')}")
-# ─────────────
-
-if r.status_code != 200 or "text/html" not in r.headers.get("Content-Type", ""):
-    return
+  try:
+    r = polite_get(url)
+    if r.status_code!=200 or "text/html" not in r.headers.get("Content-Type",""): return
+    soup = BeautifulSoup(r.text, "html.parser")
 
 
 
