@@ -42,12 +42,11 @@ resume   = st.sidebar.checkbox("Resume previous crawl", True)
 max_depth= st.sidebar.slider("Max depth", 0, 6, 2)
 max_pages= st.sidebar.number_input("Stop after N pages (0 = unlimited)", 0, 100000, 0, 100)
 
-st.sidebar.subheader("Notification")
-user_email = st.sidebar.text_input("Email to receive the report")
 
 # ───────────────────────── Main UI ─────────────────────────
 st.title("SEO Crawler & Reporter 📄")
 start_url = st.text_input("Website URL", placeholder="https://example.com")
+user_email = st.text_input("Email to receive the report", placeholder="you@example.com")
 start_btn = st.button("Start crawl")
 progress_bar, status_txt = st.empty(), st.empty()
 
