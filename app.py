@@ -49,18 +49,14 @@ max_pages = st.sidebar.number_input("Stop after N pages (0 = unlimited)", 0,
 
 # ───────────────────────── Main UI ─────────────────────────
 st.title("SEO Crawler & Reporter 📄")
-# Email input (above website URL and button)
 email = st.text_input("Your Email Address", placeholder="name@example.com")
 email_valid = re.match(r"^[^@]+@[^@]+\.[^@]+$", email or "")
 
 start_url = st.text_input("Website URL", placeholder="https://example.com")
-# Only enable crawl if email is valid and not empty
 start_btn = st.button("Start crawl", disabled=not email_valid)
 
-# Optional: Show a warning if button is pressed without a valid email
 if not email_valid and start_btn:
     st.warning("Please enter a valid email address to start the crawl.")
-
 
 # progress bar placeholders
 progress_bar = st.empty()
