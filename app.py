@@ -1,6 +1,5 @@
 # ─────────────────────────────────────────────────────────────
-# SEO Crawler & Reporter – all‑in‑one Streamlit app
-# (now with crawl‑progress bar)
+# SEO Crawler & Reporter – Streamlit (with live progress bar)
 # ─────────────────────────────────────────────────────────────
 
 import os, re, time, pickle, xml.etree.ElementTree as ET, datetime, pathlib, asyncio
@@ -88,14 +87,10 @@ def seed_from_sitemap(root):
         return [loc.text.strip() for loc in tree.iter("{*}loc")]
     except Exception:
         return []
-# ───────────────────────── Crawl data containers ─────────────────────────
+# ───────────────────────── Crawl containers ─────────────────────────
 visited, pages_crawled, SAVE_EVERY = set(), 0, 50
-rows = []                             # page‑level SEO data
-broken_links = []                     # src → href with bad status
-out_links, in_links = {}, {}          # for internal‑link graph
-duplicate_map = {}                    # (title+desc) → [urls]
-canon_map = {}                        # url → canonical target
-image_rows = []                       # heavy / dimensionless images
+rows, broken_links, image_rows = [], [], []
+out_links, in_links, duplicate_map, canon_map = {}, {}, {}, {}
 
 def save_state():
     pickle.dump((visited, rows, broken_links, out_links, in_links,
@@ -117,15 +112,14 @@ def crawl(url, base, depth, rp):
 
     try:
         r = polite_get(url)
-        if r.status_code != 200 or "text/html" not in r.headers.get("Content-Type", ""): return
+        if r.status_code != 200 or "text/html" not in r.headers.get("Content-Type",""):
+            return
         soup = BeautifulSoup(r.text, "html.parser")
 
-        # basic meta
+        # meta + deeper SEO
         title = soup.title.string.strip() if soup.title else ""
-        desc_tag = soup.find("meta", attrs={"name": "description"})
-        description = desc_tag["content"].strip() if desc_tag and desc_tag.get("content") else ""
-
-        # deeper SEO
+        description = (soup.find("meta", attrs={"name": "description"}) or {})\
+                          .get("content", "").strip()
         h_tags = " | ".join(h.get_text(strip=True) for h in soup.select("h1, h2, h3, h4, h5, h6")[:20])
         meta_robots = (soup.find("meta", attrs={"name": "robots"}) or {}).get("content", "")
         canonical = (soup.find("link", rel="canonical") or {}).get("href", "")
@@ -147,23 +141,33 @@ def crawl(url, base, depth, rp):
         dup_key = (title + description).lower().strip()
         duplicate_map.setdefault(dup_key, []).append(url)
 
-        # link processing
+        # links & images
         links_here = set()
         for a in soup.find_all("a", href=True):
             link = urljoin(url, a["href"].split("#")[0])
             if link.startswith(("mailto:", "tel:", "javascript:")): continue
             links_here.add(link)
             out_links.setdefault(url, set()).add(link)
-            in_links.setdefault(link, 0)
-            in_links[link] += 1
-        # images
+            in_links.setdefault(link, 0); in_links[link] += 1
         for img in soup.find_all("img", src=True):
             img_url = urljoin(url, img["src"])
             image_rows.append({"Page": url, "Image": img_url,
                                "Alt": img.get("alt",""),
-                               "Width": img.get("width",""), "Height": img.get("height","")})
+                               "Width": img.get("width",""),
+                               "Height": img.get("height","")})
+
+        # ── progress update ─────────────────────
+        if max_pages:
+            pct = min(pages_crawled / max_pages, 1.0)
+            progress_bar.progress(pct)
+            status_txt.text(f"Crawled {pages_crawled} / {max_pages} pages")
+        else:
+            progress_bar.progress((pages_crawled % 100) / 100)
+            status_txt.text(f"Crawled {pages_crawled} pages…")
+        # ────────────────────────────────────────
 
         pages_crawled += 1
+        if max_pages and pages_crawled >= max_pages: return
         if pages_crawled % SAVE_EVERY == 0: save_state()
 
         for link in links_here:
@@ -171,7 +175,7 @@ def crawl(url, base, depth, rp):
                 crawl(link, base, depth+1, rp)
     except Exception as e:
         st.error(f"Error on {url}: {e}")
-# ───────────────────────── Async checks: broken links & images ─────────────────────────
+# ───────────────── Async audits: broken links & images ─────────────────
 async def fetch_head(session, url):
     try:
         r = await session.head(url, follow_redirects=True, timeout=10)
@@ -180,40 +184,21 @@ async def fetch_head(session, url):
         return url, None
 
 async def audit_links_and_images():
-    # collect unique href targets + unique image URLs
     hrefs = {t for targets in out_links.values() for t in targets}
     imgs  = {row["Image"] for row in image_rows}
-    async with httpx.AsyncClient(headers=HEADERS) as session:
-        link_tasks = [fetch_head(session, u) for u in hrefs]
-        img_tasks  = [fetch_head(session, u) for u in imgs]
-        link_results = await asyncio.gather(*link_tasks)
-        img_results  = await asyncio.gather(*img_tasks)
+    async with httpx.AsyncClient(headers=HEADERS) as s:
+        link_results = await asyncio.gather(*[fetch_head(s,u) for u in hrefs])
+        img_results  = await asyncio.gather(*[fetch_head(s,u) for u in imgs])
 
-    status_map = dict(link_results)
-    img_status = dict(img_results)
-
-    # broken links table
+    status_map = dict(link_results); img_status = dict(img_results)
     for src, targets in out_links.items():
         for t in targets:
-            code = status_map.get(t)
+            code = status_map.get(t); 
             if code and code >= 400:
-                broken_links.append({
-                    "Source": src, "Href": t, "Status": code,
-                    "Type": "internal" if is_internal(start_url, t) else "external"
-                })
-
-    # enrich image rows
+                broken_links.append({"Source": src,"Href": t,"Status": code,
+                                     "Type": "internal" if is_internal(start_url,t) else "external"})
     for row in image_rows:
-        url = row["Image"]
-        code = img_status.get(url)
-        row["Status"] = code
-        row["KB"] = ""
-        if code and code < 400:
-            try:
-                size = int(asyncio.run(fetch_head(session, url))[1].headers.get("Content-Length", 0))
-                row["KB"] = round(size/1024,1)
-            except Exception:
-                pass
+        row["Status"] = img_status.get(row["Image"])
 
 # ───────────────────────── Run crawl ─────────────────────────
 if start_btn and start_url:
@@ -232,6 +217,9 @@ if start_btn and start_url:
     asyncio.run(audit_links_and_images())
     save_state()
 
+    progress_bar.progress(1.0)
+    status_txt.text(f"Finished crawl – {pages_crawled} pages.")
+
     if not rows:
         st.warning("No pages crawled."); st.stop()
 
@@ -240,116 +228,86 @@ if start_btn and start_url:
              "OG title","OG description","Twitter card","Schema types"]
     df = df[order]
 
-    # quality
+    # quality flags
     df["Title empty"]     = df["Title"] == ""
     df["Title too long"]  = df["Title"].str.len() > 60
     df["Desc empty"]      = df["Meta description"] == ""
     df["Desc too long"]   = df["Meta description"].str.len() > 155
     df["Title duplicate"] = df.duplicated("Title", keep=False)
     # indexability overlay
-    def index_status(row):
-        if row["Meta robots"].lower().find("noindex") != -1:
-            return "Noindex"
-        if row["Canonical"] and row["Canonical"] != row["URL"]:
-            return "Canonicalized"
+    def idx(row):
+        if "noindex" in row["Meta robots"].lower(): return "Noindex"
+        if row["Canonical"] and row["Canonical"] != row["URL"]: return "Canonicalized"
         return "Indexable"
-    df["Indexability"] = df.apply(index_status, axis=1)
+    df["Indexability"] = df.apply(idx, axis=1)
 
-    # duplicate clusters table
-    dup_clusters = [
-        {"Cluster key": k[:60]+"…" if len(k)>60 else k, "URLs": " | ".join(v)}
-        for k, v in duplicate_map.items() if len(v) > 1
-    ]
-    dup_df = pd.DataFrame(dup_clusters)
-
-    # canonical issues
-    can_issues = []
-    for src, tgt in canon_map.items():
-        if not tgt: continue
-        if tgt == src: continue
-        if tgt in canon_map and canon_map[tgt] == src:
-            can_issues.append({"Page": src, "Canonical target": tgt, "Issue": "Loop"})
-        elif tgt not in in_links:
-            can_issues.append({"Page": src, "Canonical target": tgt, "Issue": "Points to non‑crawled"})
-    can_df = pd.DataFrame(can_issues)
-
-    # broken links df
+    dup_df = pd.DataFrame(
+        [{"Cluster": k[:60]+"…" if len(k)>60 else k, "URLs": " | ".join(v)}
+         for k, v in duplicate_map.items() if len(v)>1]
+    )
+    can_df = pd.DataFrame(
+        [{"Page": s, "Canonical target": t, "Issue": (
+            "Loop" if canon_map.get(t)==s else "Target not crawled")}
+         for s,t in canon_map.items() if t and t!=s and
+           (canon_map.get(t)==s or t not in in_links)]
+    )
     broken_df = pd.DataFrame(broken_links)
     image_df  = pd.DataFrame(image_rows)
-    # orphan pages
-    orphan_df = pd.DataFrame(
-        [{"URL": u, "Inbound links": in_links.get(u,0)} for u in df["URL"] if in_links.get(u,0)==0]
-    )
+    orphan_df = pd.DataFrame([{"URL": u} for u in df["URL"] if in_links.get(u,0)==0])
 
     # ────────── UI tabs ──────────
     tabs = st.tabs(["All pages","Issues","Broken links","Duplicates","Canonicals",
                     "Internal graph","Images","Orphans"])
-    with tabs[0]:
-        st.dataframe(df, use_container_width=True)
+    with tabs[0]: st.dataframe(df, use_container_width=True)
     with tabs[1]:
-        issues = df[df[["Title empty","Title too long","Title duplicate",
-                        "Desc empty","Desc too long","Indexability"]]
-                     .apply(lambda r: r["Title empty"] or r["Title too long"] or
-                                      r["Title duplicate"] or r["Desc empty"] or
-                                      r["Desc too long"] or r["Indexability"]!="Indexable", axis=1)]
-        st.dataframe(issues, use_container_width=True)
-    with tabs[2]:
-        st.dataframe(broken_df, use_container_width=True)
-    with tabs[3]:
-        st.dataframe(dup_df, use_container_width=True)
-    with tabs[4]:
-        st.dataframe(can_df, use_container_width=True)
+        iss = df[(df["Title empty"]|df["Title too long"]|df["Title duplicate"]|
+                  df["Desc empty"]|df["Desc too long"]|(df["Indexability"]!="Indexable"))]
+        st.dataframe(iss, use_container_width=True)
+    with tabs[2]: st.dataframe(broken_df, use_container_width=True)
+    with tabs[3]: st.dataframe(dup_df, use_container_width=True)
+    with tabs[4]: st.dataframe(can_df, use_container_width=True)
     with tabs[5]:
         dot = Digraph()
-        for src, targets in list(out_links.items())[:200]:  # limit for readability
+        for src, targets in list(out_links.items())[:200]:
             for t in list(targets)[:50]:
-                if is_internal(base_url, t):
-                    dot.edge(src, t)
+                if is_internal(base_url, t): dot.edge(src, t)
         st.graphviz_chart(dot)
-    with tabs[6]:
-        st.dataframe(image_df, use_container_width=True)
-    with tabs[7]:
-        st.dataframe(orphan_df, use_container_width=True)
+    with tabs[6]: st.dataframe(image_df, use_container_width=True)
+    with tabs[7]: st.dataframe(orphan_df, use_container_width=True)
 
-    # charts
+    # chart
     df["Depth"] = df["URL"].str.count("/") - base_url.count("/")
     fig1 = plt.figure(); df[df["Meta description"]==""].groupby("Depth").size().plot(kind="bar")
     plt.title("Missing Meta Descriptions by Depth"); plt.xlabel("Depth"); plt.ylabel("Pages")
     st.pyplot(fig1)
 
     # exports
-    st.download_button("Download CSV", df.to_csv(index=False).encode("utf-8"),
-                       "crawl_data.csv","text/csv")
-    st.download_button("Download JSON",
-                       df.to_json(orient="records", indent=2).encode("utf-8"),
-                       "crawl_data.json","application/json")
+    st.download_button("CSV", df.to_csv(index=False).encode("utf-8"), "crawl.csv","text/csv")
+    st.download_button("JSON", df.to_json(orient="records",indent=2).encode("utf-8"),
+                       "crawl.json","application/json")
     xbuf = BytesIO()
     with pd.ExcelWriter(xbuf, engine="xlsxwriter") as w:
-        df.to_excel(w, index=False, sheet_name="Pages")
-        broken_df.to_excel(w, index=False, sheet_name="Broken")
-        dup_df.to_excel(w, index=False, sheet_name="Duplicates")
-        can_df.to_excel(w, index=False, sheet_name="Canonicals")
-    st.download_button("Download Excel",
-                       xbuf.getvalue(),"crawl_data.xlsx",
+        df.to_excel(w,index=False,sheet_name="Pages")
+        broken_df.to_excel(w,index=False,sheet_name="Broken")
+        dup_df.to_excel(w,index=False,sheet_name="Duplicates")
+        can_df.to_excel(w,index=False,sheet_name="Canonicals")
+    st.download_button("Excel", xbuf.getvalue(), "crawl.xlsx",
                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
     # historical diff
     today_file = HISTORY_DIR / f"{datetime.date.today()}.parquet"
     df.to_parquet(today_file, index=False)
-    prev_files = sorted(HISTORY_DIR.glob("*.parquet"))[-2:-1]
-    if prev_files:
-        prev = pq.read_table(prev_files[0]).to_pandas()
-        merged = df.merge(prev, on="URL", how="outer",
-                          suffixes=("_new","_old"), indicator=True)
-        changed = merged[
-            (merged["_merge"] != "both") |
-            (merged["Title_new"] != merged["Title_old"]) |
-            (merged["Meta description_new"] != merged["Meta description_old"])
-        ]
+    prev = sorted(HISTORY_DIR.glob("*.parquet"))[-2:-1]
+    if prev:
+        old = pq.read_table(prev[0]).to_pandas()
+        diff = df.merge(old,on="URL",how="outer",suffixes=("_new","_old"),indicator=True)
+        changed = diff[(diff["_merge"]!="both") |
+                       (diff["Title_new"]!=diff["Title_old"]) |
+                       (diff["Meta description_new"]!=diff["Meta description_old"])]
         if not changed.empty:
             st.subheader("🔄 Changes since last crawl")
             st.dataframe(changed[["URL","Title_old","Title_new",
                                   "Meta description_old","Meta description_new"]],
                          use_container_width=True)
 
-    st.write(f"Crawl UA: `{HEADERS['User-Agent']}`")
+    st.caption(f"Crawl UA: `{HEADERS['User-Agent']}`")
