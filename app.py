@@ -175,10 +175,17 @@ if start_btn and start_url:
     st.download_button("Download JSON",
                        df.to_json(orient="records", indent=2).encode("utf-8"),
                        "meta_data.json","application/json")
-    xbuf = BytesIO(); with pd.ExcelWriter(xbuf, engine="xlsxwriter") as w: df.to_excel(w,index=False,sheet_name="SEO")
-    st.download_button("Download Excel",
-                       xbuf.getvalue(),"meta_data.xlsx",
-                       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+    xbuf = BytesIO()
+    with pd.ExcelWriter(xbuf, engine="xlsxwriter") as writer:
+        df.to_excel(writer, index=False, sheet_name="SEO")
+
+    st.download_button(
+        "Download Excel",
+        xbuf.getvalue(),
+        "meta_data.xlsx",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
 
     # ────────── Historical diff ──────────
     today_file = HISTORY_DIR / f"{datetime.date.today()}.parquet"
