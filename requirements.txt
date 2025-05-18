@@ -5,3 +5,6 @@ tldextract
 pandas
 robotexclusionrulesparser
 lxml
+matplotlib
+xlsxwriter
+pyarrow
