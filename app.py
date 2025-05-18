@@ -129,8 +129,15 @@ def crawl(url, base, depth, rp):
     visited.add(url)
 
     try:
-        r = polite_get(url)
-        if r.status_code!=200 or "text/html" not in r.headers.get("Content-Type",""): return
+       r = polite_get(url)
+
+# ─── debug ───
+st.write(f" ↳ status {r.status_code}, content‑type {r.headers.get('Content-Type','')}")
+# ─────────────
+
+if r.status_code != 200 or "text/html" not in r.headers.get("Content-Type", ""):
+    return
+
         soup = BeautifulSoup(r.text, "html.parser")
 
         # collect tags
