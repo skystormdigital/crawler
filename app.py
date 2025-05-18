@@ -35,8 +35,8 @@ if ua_choice == "Custom…":
     UA_OPTS["Custom…"] = st.sidebar.text_input("Enter custom UA string", "")
 HEADERS = {"User-Agent": UA_OPTS[ua_choice] or UA_OPTS["StreamlitCrawler (default)"]}
 
-inc_re = re.compile(st.sidebar.text_input("Include pattern (regex)", "")) or None
-exc_re = re.compile(st.sidebar.text_input("Exclude pattern (regex)", "")) or None
+inc_re = re.compile(inc_pat) if inc_pat else None
+exc_re = re.compile(exc_pat) if exc_pat else None
 delay_sec = st.sidebar.number_input("Delay between requests (s)", 0.0, 10.0, 0.5, 0.1)
 resume   = st.sidebar.checkbox("Resume previous crawl", True)
 max_depth= st.sidebar.slider("Max depth", 0, 6, 2)
